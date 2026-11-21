@@ -5,6 +5,7 @@ import streamlit as st
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
+# ── 한글 폰트 (Streamlit) ──────────────────────────────────────────────
 st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR&display=swap');
@@ -15,6 +16,7 @@ html, body, [class*="css"] {
 """, unsafe_allow_html=True)
 st.set_page_config(page_title="극지식물 연구 가설과 분석 결과", layout="wide")
 
+# ── CSV 읽기 (인코딩 자동 전환) ─────────────────────────────────────────
 @st.cache_data
 def read_csv(file):
     data = file.getvalue()
@@ -25,6 +27,7 @@ def read_csv(file):
             pass
     return pd.DataFrame()
 
+# ── 열 이름 표준화 (KeyError 방지) ──────────────────────────────────────
 def std_cols(df):
     df = df.copy()
     df.columns = [str(c).strip() for c in df.columns]
@@ -84,7 +87,39 @@ def school_name_from_filename(filename):
     m = re.match(r"^([가-힣A-Za-z0-9]+(?:고|중|초|대학교|학교)?)", base)
     return m.group(1) if m else "우리 학교"
 
-# ── 산점도 + 추세선 ─────────────────────────────────────────────────────
+# ── 공통 배경/글꼴 스타일 (모든 그래프에 적용) ─────────────────────────
+BG     = "rgba(255,245,250,0.95)"   # 연한 핑크 배경
+BGBAR  = "rgba(255,250,245,0.95)"   # 막대·꺾은선 배경
+FONTC  = "#000000"                  # 모든 글자 검정
+GRIDC  = "#E8E0DA"                  # 그리드 연한 회색
+ZEROC  = "#CCCCCC"                  # 0선 중간 회색
+HOVBG  = "#FFF8F0"                  # 호버 배경 연한 베이지
+TFONTC = "#111111"                  # 제목 짙은 검정
+
+def base_layout(fig, title, x_title, y_title, bg=BG):
+    fig.update_layout(
+        font=dict(family="Malgun Gothic, Apple SD Gothic Neo, sans-serif",
+                  color=FONTC),
+        plot_bgcolor=bg,
+        paper_bgcolor=bg,
+        hoverlabel=dict(font=dict(color=FONTC), bgcolor=HOVBG,
+                        bordercolor="#CCCCCC"),
+        title=dict(text=title, font=dict(size=15, color=TFONTC),
+                   x=0.03, xanchor="left"),
+        xaxis=dict(title=x_title, color=FONTC,
+                   gridcolor=GRIDC, zerolinecolor=ZEROC,
+                   tickfont=dict(color=FONTC, size=12),
+                   titlefont=dict(color=FONTC, size=13)),
+        yaxis=dict(title=y_title, color=FONTC,
+                   gridcolor=GRIDC, zerolinecolor=ZEROC,
+                   tickfont=dict(color=FONTC, size=12),
+                   titlefont=dict(color=FONTC, size=13)),
+        margin=dict(l=60, r=30, t=65, b=60),
+        hovermode="closest",
+    )
+    return fig
+
+# ── 산점도 + 추세선 (점만) ─────────────────────────────────────────────
 def scatter_trend(x, y, x_label, y_label, color="#2196F3"):
     xy = pd.DataFrame({"x": x, "y": y}).dropna()
     if len(xy) < 2:
@@ -102,58 +137,29 @@ def scatter_trend(x, y, x_label, y_label, color="#2196F3"):
     fig.add_trace(go.Scatter(
         x=xy["x"], y=xy["y"],
         mode="markers",
-        marker=dict(color=color, size=9, opacity=0.88, line=dict(width=1.2, color="white")),
+        marker=dict(color=color, size=9, opacity=0.88,
+                    line=dict(width=1.2, color="white")),
         name="데이터",
         hovertemplate="%{x:.2f}<br>%{y:.2f}<extra></extra>",
     ))
     fig.add_trace(go.Scatter(
         x=xy["x"], y=pred,
         mode="lines",
-        line=dict(color="#E53935", width=2.5),
+        line=dict(color="#C0392B", width=2.5),
         name=f"추세선 (r={r:.3f})",
     ))
     title = f"{x_label} vs {y_label}  (상관계수 r = {r:.3f}"
     if p_val is not None:
         title += f", p = {p_val:.4f}"
     title += ")"
-    fig.update_layout(
-        font=dict(family="Malgun Gothic, Apple SD Gothic Neo, sans-serif", color="#111111"),
-        plot_bgcolor="#FFFFFF",
-        paper_bgcolor="#FFFFFF",
-        title=dict(text=title, font=dict(size=15, color="#111111"), x=0.03, xanchor="left"),
-        xaxis=dict(title=x_label, gridcolor="#E8E8E8", zerolinecolor="#CCCCCC",
-                   tickfont=dict(size=12, color="#111111"),
-                   titlefont=dict(size=12, color="#111111")),
-        yaxis=dict(title=y_label, gridcolor="#E8E8E8", zerolinecolor="#CCCCCC",
-                   tickfont=dict(size=12, color="#111111"),
-                   titlefont=dict(size=12, color="#111111")),
-        margin=dict(l=55, r=30, t=60, b=55),
-        hovermode="closest",
-    )
-    return fig
-
-def style_fig(fig, title, x_title, y_title):
-    fig.update_layout(
-        font=dict(family="Malgun Gothic, Apple SD Gothic Neo, sans-serif", color="#111111"),
-        plot_bgcolor="#FFFFFF",
-        paper_bgcolor="#FFFFFF",
-        title=dict(text=title, font=dict(size=15, color="#111111"), x=0.03, xanchor="left"),
-        xaxis=dict(title=x_title, gridcolor="#EEEEEE", zerolinecolor="#DDDDDD",
-                   tickfont=dict(size=12, color="#111111"),
-                   titlefont=dict(size=12, color="#111111")),
-        yaxis=dict(title=y_title, gridcolor="#EEEEEE", zerolinecolor="#DDDDDD",
-                   tickfont=dict(size=12, color="#111111"),
-                   titlefont=dict(size=12, color="#111111")),
-        margin=dict(l=55, r=30, t=60, b=55),
-        hovermode="closest",
-    )
+    base_layout(fig, title, x_label, y_label)
     return fig
 
 # ════════════════════════════════════════════════════════════════════════
 #  사이드바
 # ════════════════════════════════════════════════════════════════════════
 st.sidebar.title("📁 데이터 업로드")
-env_file    = st.sidebar.file_uploader("환경 데이터 CSV", type="csv")
+env_file = st.sidebar.file_uploader("환경 데이터 CSV", type="csv")
 growth_file = st.sidebar.file_uploader("생육 결과 데이터 CSV", type="csv")
 
 @st.cache_data
@@ -176,10 +182,13 @@ with st.sidebar.spinner("데이터를 불러오는 중..."):
 st.sidebar.markdown(f"🏫 **{school}** 극지식물 연구")
 st.sidebar.caption("파일명 앞부분에서 학교명을 자동으로 읽어요.")
 
+# ════════════════════════════════════════════════════════════════════════
+#  탭 구성
+# ════════════════════════════════════════════════════════════════════════
 tab1, tab2, tab3 = st.tabs(["📋 실험 소개", "📊 생육 데이터 값", "✅ 결과 및 가설 확인"])
 
 # ────────────────────────────────────────────────────────────────────────
-#  Tab 1
+#  Tab 1 — 실험 소개
 # ────────────────────────────────────────────────────────────────────────
 with tab1:
     try:
@@ -230,7 +239,7 @@ with tab1:
         st.warning(f"⚠️ 이 부분은 데이터 형식 때문에 표시하지 못했어요: {e}")
 
 # ────────────────────────────────────────────────────────────────────────
-#  Tab 2
+#  Tab 2 — 생육 데이터 값
 # ────────────────────────────────────────────────────────────────────────
 with tab2:
     try:
@@ -274,12 +283,14 @@ with tab2:
                     m1.metric("지하부 질량 평균", f"{mean_below:.4f} g")
                     m2.metric("잎 수평균", f"{mean_leaf:.1f} 장")
                     m3.metric("t 평균 (개체 편차 평균)", f"{t_mean:.4f}")
+
                     st.caption(
-                        "• t = (|지하부질량−평균| + |잎수−평균|) ÷ 2\n"
+                        "• t = (|지하부질량−평균| + |잎수−평균|) ÷ 2  — "
+                        "개체가 평균에서 얼마나 떨어져 있는지 나타내는 값\n"
                         "• t가 작을수록 평균에 가까운 '보통' 개체, 클수록 눈에 띄는 개체"
                     )
 
-                    # ── 원 그래프 (핑크 배경 + 검정 글씨 + 검정 조각) ────
+                    # ── 원 그래프: 평균 이하 vs 초과 (분홍 배경) ─────────
                     st.subheader("🥧 t 평균 기준 개체 비율 (원 그래프)")
                     fig_pie = go.Figure()
                     fig_pie.add_trace(go.Pie(
@@ -288,28 +299,23 @@ with tab2:
                             f"t 평균 초과<br>{n_above}개체 · {pct_above:.1f}%",
                         ],
                         values=[n_below, n_above],
-                        marker=dict(colors=["#C0392B", "#2980B9"]),
-                        hole=0.42,
+                        marker=dict(colors=["#FFB6C1", "#FF69B4"]),
+                        hole=0.45,
                         textinfo="label+percent",
                         textposition="outside",
-                        textfont=dict(size=13, color="#111111"),
+                        textfont=dict(color=FONTC, size=13, family="Malgun Gothic"),
                         hoverinfo="label+value+percent",
+                        hoverlabel=dict(font=dict(color=FONTC, size=13,
+                                                  family="Malgun Gothic"),
+                                        bgcolor=HOVBG, bordercolor="#CCCCCC"),
                     ))
-                    fig_pie.update_layout(
-                        font=dict(family="Malgun Gothic, Apple SD Gothic Neo, sans-serif",
-                                  color="#111111"),
-                        plot_bgcolor="#FFF0F5",
-                        paper_bgcolor="#FFF0F5",
-                        title=dict(
-                            text=f"t 평균 {t_mean:.4f} 기준 — 총 {n_total}개체",
-                            font=dict(size=15, color="#111111"),
-                            x=0.03, xanchor="left",
-                        ),
-                        margin=dict(l=30, r=30, t=60, b=40),
-                    )
+                    base_layout(fig_pie,
+                                f"t 평균 {t_mean:.4f} 기준 — 총 {n_total}개체",
+                                "", "")
+                    fig_pie.update_layout(margin=dict(l=30, r=30, t=65, b=40))
                     st.plotly_chart(fig_pie, width="stretch")
 
-                    # ── t 분포 산점도 ────────────────────────────────────
+                    # ── t 분포 산점도 (점만) ─────────────────────────────
                     st.subheader("📈 개체별 t 값 분포 (산점도)")
                     idx_sorted = t_per.sort_index()
                     fig_t = go.Figure()
@@ -317,40 +323,48 @@ with tab2:
                         x=list(range(1, len(idx_sorted) + 1)),
                         y=idx_sorted.values,
                         mode="markers",
-                        marker=dict(color="#E67E22", size=11, opacity=0.88,
-                                    line=dict(width=1.5, color="white")),
+                        marker=dict(
+                            color="#E67E22", size=11, opacity=0.85,
+                            line=dict(width=1.5, color="white"),
+                        ),
                         name="t 값",
                         hovertemplate="개체 %{x}<br>t = %{y:.4f}<extra></extra>",
                     ))
-                    fig_t.add_hline(y=t_mean, line_dash="dash", line_color="#C0392B",
-                                    line_width=2,
-                                    annotation_text=f"t 평균 = {t_mean:.4f}",
-                                    annotation_position="top right",
-                                    annotation_font=dict(size=12, color="#C0392B"))
-                    style_fig(fig_t,
-                              "개체별 t 값 (주황 점 = 개별 개체, 빨간 점선 = t 평균)",
-                              "개체 순번", "t (편차 평균)")
+                    fig_t.add_hline(
+                        y=t_mean, line_dash="dash", line_color="#C0392B",
+                        line_width=2,
+                        annotation_text=f"t 평균 = {t_mean:.4f}",
+                        annotation_position="top right",
+                        annotation_font=dict(size=12, color="#C0392B",
+                                             family="Malgun Gothic"),
+                    )
+                    base_layout(fig_t,
+                                "개체별 t 값 (주황 점 = 개별 개체, 빨간 점선 = t 평균)",
+                                "개체 순번", "t (편차 평균)")
                     st.plotly_chart(fig_t, width="stretch")
 
                     # ── 막대 그래프 ───────────────────────────────────────
                     st.subheader("📊 개체별 t vs t 평균 (막대 그래프)")
-                    bar_colors = ["#27AE60" if v <= t_mean else "#C0392B"
-                                  for v in idx_sorted.values]
+                    colors_map = {False: "#27AE60", True: "#C0392B"}
+                    bar_colors = [colors_map[v > t_mean] for v in idx_sorted.values]
                     fig_bar = go.Figure()
                     fig_bar.add_trace(go.Bar(
                         x=list(range(1, len(idx_sorted) + 1)),
                         y=idx_sorted.values,
                         marker=dict(color=bar_colors, line=dict(width=0.8, color="white"),
-                                    opacity=0.92),
+                                    opacity=0.90),
                         name="개체별 t",
                         hovertemplate="개체 %{x}<br>t = %{y:.4f}<extra></extra>",
                     ))
                     fig_bar.add_hline(y=t_mean, line_dash="dash", line_color="#555555",
                                       line_width=2, annotation_text="t 평균",
-                                      annotation_position="top right")
-                    style_fig(fig_bar,
-                              "개체별 t 값 — 🟢 평균 이하 · 🔴 평균 초과",
-                              "개체 순번", "t")
+                                      annotation_position="top right",
+                                      annotation_font=dict(size=12, color="#555555",
+                                                           family="Malgun Gothic"))
+                    base_layout(fig_bar,
+                                "개체별 t 값 — 🟢 평균 이하 · 🔴 평균 초과",
+                                "개체 순번", "t",
+                                bg=BGBAR)
                     st.plotly_chart(fig_bar, width="stretch")
 
                     # ── 꺾은선 그래프 ─────────────────────────────────────
@@ -358,8 +372,12 @@ with tab2:
                     fig_line = go.Figure()
                     fig_line.add_hline(y=t_mean, line_dash="dash", line_color="#AAAAAA",
                                        line_width=2, annotation_text="t 평균",
-                                       annotation_position="top right")
-                    for pos, tv in zip(range(1, len(idx_sorted) + 1), idx_sorted.values):
+                                       annotation_position="top right",
+                                       annotation_font=dict(size=12, color="#AAAAAA",
+                                                            family="Malgun Gothic"))
+                    for i, (pos, tv) in enumerate(
+                        zip(range(1, len(idx_sorted) + 1), idx_sorted.values)
+                    ):
                         fig_line.add_trace(go.Scatter(
                             x=[pos, pos], y=[t_mean, tv],
                             mode="lines", line=dict(color="#85C1E9", width=1.8),
@@ -382,9 +400,10 @@ with tab2:
                         name="t 평균",
                         hovertemplate="t 평균 = %{y:.4f}<extra></extra>",
                     ))
-                    style_fig(fig_line,
-                              "t 평균(회색 마름모)에서 각 개체 t(파란 점)까지의 거리",
-                              "개체 순번", "t")
+                    base_layout(fig_line,
+                                "t 평균(회색 마름모)에서 각 개체 t(파란 점)까지의 거리",
+                                "개체 순번", "t",
+                                bg=BGBAR)
                     st.plotly_chart(fig_line, width="stretch")
 
                     # ── 상관관계 산점도 ──────────────────────────────────
@@ -421,6 +440,7 @@ with tab2:
                         "0에 가까우면 관계가 약합니다."
                     )
 
+        # ── Expander: 생육 원본 + CSV 다운로드 ─────────────────────────
         with st.expander("📄 생육 데이터 원본 테이블 + CSV 다운로드"):
             if not growth_df.empty:
                 disp = growth_df.copy()
@@ -440,7 +460,7 @@ with tab2:
         st.warning(f"⚠️ 이 부분은 데이터 형식 때문에 표시하지 못했어요: {e}")
 
 # ────────────────────────────────────────────────────────────────────────
-#  Tab 3
+#  Tab 3 — 결과 및 가설 확인
 # ────────────────────────────────────────────────────────────────────────
 with tab3:
     try:
@@ -485,12 +505,12 @@ with tab3:
                             verdict = (
                                 f"✅ 가설이 **지지됨** (p < 0.05, r = {r_val:.3f}, {direction})"
                                 if r_val > 0 else
-                                f"❌ 가설이 **기각됨** (r = {r_val:.3f}, {direction})"
+                                f"❌ 가설이 **기각됨** — 오히려 역방향 관계 (r = {r_val:.3f})"
                             )
                         elif p_val is not None:
                             verdict = (
                                 f"⚠️ **유의하지 않음** (p = {p_val:.3f} ≥ 0.05) — "
-                                "이 데이터만으로는 단정하기 어려움"
+                                "이 데이터만으로는 가설의 옳고 그름을 단정하기 어려움"
                             )
                         else:
                             verdict = (
@@ -505,6 +525,9 @@ with tab3:
                     if r_val <= 0 or (p_val is not None and p_val >= 0.05):
                         st.subheader("🔍 가설이 맞지 않을 수 있는 원인")
                         st.markdown("""
+지하부 질량과 잎 수 사이에 뚜렷한 정방향 관계가 나타나지 않은 이유는
+다음과 같이 생각해볼 수 있습니다.
+
 1. **지하부 질량이 잎 수를 직접 결정하지 않을 수 있음**
    잎의 수는 유전, 광량, 생장 단계, 호르몬 등 여러 요인의 영향을 받아요.
    뿌리 질량만으로 잎 수를 예측하기는 어렵습니다.
