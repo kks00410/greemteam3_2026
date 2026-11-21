@@ -87,16 +87,32 @@ def school_name_from_filename(filename):
     m = re.match(r"^([가-힣A-Za-z0-9]+(?:고|중|초|대학교|학교)?)", base)
     return m.group(1) if m else "우리 학교"
 
-# ── 공통 배경/글꼴 스타일 (모든 그래프에 적용) ─────────────────────────
-BG     = "rgba(255,245,250,0.95)"   # 연한 핑크 배경
-BGBAR  = "rgba(255,250,245,0.95)"   # 막대·꺾은선 배경
-FONTC  = "#000000"                  # 모든 글자 검정
-GRIDC  = "#E8E0DA"                  # 그리드 연한 회색
-ZEROC  = "#CCCCCC"                  # 0선 중간 회색
-HOVBG  = "#FFF8F0"                  # 호버 배경 연한 베이지
-TFONTC = "#111111"                  # 제목 짙은 검정
+# ── 공통 색상/스타일 상수 ──────────────────────────────────────────────
+BG_PINK  = "rgba(255,245,250,0.95)"
+BG_BEIGE = "rgba(255,250,245,0.95)"
+FONTC    = "#000000"
+TFONTC   = "#111111"
+GRIDC    = "#E8E0DA"
+ZEROC    = "#CCCCCC"
+HOVBG    = "#FFF8F0"
 
-def base_layout(fig, title, x_title, y_title, bg=BG):
+# ── hline + 주석 추가 헬퍼 (annotation_font 대체) ──────────────────────
+def add_hline_annot(fig, y, color, label, pos="top right", size=12):
+    """점선 hline + 오른쪽 위 라벨 주석을 한 번에 추가."""
+    fig.add_hline(y=y, line_dash="dash", line_color=color, line_width=2)
+    fig.add_annotation(
+        x=1.0, y=y,
+        xref="paper", yref="y",
+        text=label,
+        xanchor="right", yanchor="bottom",
+        showarrow=False,
+        font=dict(family="Malgun Gothic, Apple SD Gothic Neo, sans-serif",
+                  color=color, size=size),
+    )
+
+# ── 공통 레이아웃 (글자 전부 검정, 배경은 연한 핑크/베이지) ──────────
+def base_layout(fig, title, x_title, y_title, bg=BG_PINK):
+    # title 속 font로 제목 글꼴 지정 (titlefont → title.font 로 수정)
     fig.update_layout(
         font=dict(family="Malgun Gothic, Apple SD Gothic Neo, sans-serif",
                   color=FONTC),
@@ -104,22 +120,34 @@ def base_layout(fig, title, x_title, y_title, bg=BG):
         paper_bgcolor=bg,
         hoverlabel=dict(font=dict(color=FONTC), bgcolor=HOVBG,
                         bordercolor="#CCCCCC"),
-        title=dict(text=title, font=dict(size=15, color=TFONTC),
+        title=dict(text=title,
+                   font=dict(family="Malgun Gothic, Apple SD Gothic Neo, sans-serif",
+                             color=TFONTC, size=15),
                    x=0.03, xanchor="left"),
-        xaxis=dict(title=x_title, color=FONTC,
-                   gridcolor=GRIDC, zerolinecolor=ZEROC,
-                   tickfont=dict(color=FONTC, size=12),
-                   titlefont=dict(color=FONTC, size=13)),
-        yaxis=dict(title=y_title, color=FONTC,
-                   gridcolor=GRIDC, zerolinecolor=ZEROC,
-                   tickfont=dict(color=FONTC, size=12),
-                   titlefont=dict(color=FONTC, size=13)),
+        xaxis=dict(
+            title=dict(text=x_title,
+                       font=dict(family="Malgun Gothic, Apple SD Gothic Neo, sans-serif",
+                                 color=FONTC, size=13)),
+            color=FONTC,
+            gridcolor=GRIDC, zerolinecolor=ZEROC,
+            tickfont=dict(family="Malgun Gothic, Apple SD Gothic Neo, sans-serif",
+                          color=FONTC, size=12),
+        ),
+        yaxis=dict(
+            title=dict(text=y_title,
+                       font=dict(family="Malgun Gothic, Apple SD Gothic Neo, sans-serif",
+                                 color=FONTC, size=13)),
+            color=FONTC,
+            gridcolor=GRIDC, zerolinecolor=ZEROC,
+            tickfont=dict(family="Malgun Gothic, Apple SD Gothic Neo, sans-serif",
+                          color=FONTC, size=12),
+        ),
         margin=dict(l=60, r=30, t=65, b=60),
         hovermode="closest",
     )
     return fig
 
-# ── 산점도 + 추세선 (점만) ─────────────────────────────────────────────
+# ── 산점도 + 추세선 (점만 표시) ─────────────────────────────────────────
 def scatter_trend(x, y, x_label, y_label, color="#2196F3"):
     xy = pd.DataFrame({"x": x, "y": y}).dropna()
     if len(xy) < 2:
@@ -290,7 +318,7 @@ with tab2:
                         "• t가 작을수록 평균에 가까운 '보통' 개체, 클수록 눈에 띄는 개체"
                     )
 
-                    # ── 원 그래프: 평균 이하 vs 초과 (분홍 배경) ─────────
+                    # ── 원 그래프: 평균 이하 vs 초과 (분홍 배경, 글씨 검정) ─
                     st.subheader("🥧 t 평균 기준 개체 비율 (원 그래프)")
                     fig_pie = go.Figure()
                     fig_pie.add_trace(go.Pie(
@@ -303,10 +331,11 @@ with tab2:
                         hole=0.45,
                         textinfo="label+percent",
                         textposition="outside",
-                        textfont=dict(color=FONTC, size=13, family="Malgun Gothic"),
+                        textfont=dict(family="Malgun Gothic, Apple SD Gothic Neo, sans-serif",
+                                      color=FONTC, size=13),
                         hoverinfo="label+value+percent",
-                        hoverlabel=dict(font=dict(color=FONTC, size=13,
-                                                  family="Malgun Gothic"),
+                        hoverlabel=dict(font=dict(family="Malgun Gothic, Apple SD Gothic Neo, sans-serif",
+                                                  color=FONTC, size=13),
                                         bgcolor=HOVBG, bordercolor="#CCCCCC"),
                     ))
                     base_layout(fig_pie,
@@ -330,14 +359,8 @@ with tab2:
                         name="t 값",
                         hovertemplate="개체 %{x}<br>t = %{y:.4f}<extra></extra>",
                     ))
-                    fig_t.add_hline(
-                        y=t_mean, line_dash="dash", line_color="#C0392B",
-                        line_width=2,
-                        annotation_text=f"t 평균 = {t_mean:.4f}",
-                        annotation_position="top right",
-                        annotation_font=dict(size=12, color="#C0392B",
-                                             family="Malgun Gothic"),
-                    )
+                    add_hline_annot(fig_t, t_mean, "#C0392B",
+                                    f"t 평균 = {t_mean:.4f}", size=12)
                     base_layout(fig_t,
                                 "개체별 t 값 (주황 점 = 개별 개체, 빨간 점선 = t 평균)",
                                 "개체 순번", "t (편차 평균)")
@@ -356,25 +379,16 @@ with tab2:
                         name="개체별 t",
                         hovertemplate="개체 %{x}<br>t = %{y:.4f}<extra></extra>",
                     ))
-                    fig_bar.add_hline(y=t_mean, line_dash="dash", line_color="#555555",
-                                      line_width=2, annotation_text="t 평균",
-                                      annotation_position="top right",
-                                      annotation_font=dict(size=12, color="#555555",
-                                                           family="Malgun Gothic"))
+                    add_hline_annot(fig_bar, t_mean, "#555555", "t 평균", size=12)
                     base_layout(fig_bar,
                                 "개체별 t 값 — 🟢 평균 이하 · 🔴 평균 초과",
-                                "개체 순번", "t",
-                                bg=BGBAR)
+                                "개체 순번", "t", bg=BG_BEIGE)
                     st.plotly_chart(fig_bar, width="stretch")
 
                     # ── 꺾은선 그래프 ─────────────────────────────────────
                     st.subheader("📉 t 평균 대비 각 개체 t 위치 (꺾은선 그래프)")
                     fig_line = go.Figure()
-                    fig_line.add_hline(y=t_mean, line_dash="dash", line_color="#AAAAAA",
-                                       line_width=2, annotation_text="t 평균",
-                                       annotation_position="top right",
-                                       annotation_font=dict(size=12, color="#AAAAAA",
-                                                            family="Malgun Gothic"))
+                    add_hline_annot(fig_line, t_mean, "#AAAAAA", "t 평균", size=12)
                     for i, (pos, tv) in enumerate(
                         zip(range(1, len(idx_sorted) + 1), idx_sorted.values)
                     ):
@@ -402,8 +416,7 @@ with tab2:
                     ))
                     base_layout(fig_line,
                                 "t 평균(회색 마름모)에서 각 개체 t(파란 점)까지의 거리",
-                                "개체 순번", "t",
-                                bg=BGBAR)
+                                "개체 순번", "t", bg=BG_BEIGE)
                     st.plotly_chart(fig_line, width="stretch")
 
                     # ── 상관관계 산점도 ──────────────────────────────────
