@@ -2,7 +2,6 @@ import io, os, re
 import numpy as np
 import pandas as pd
 import streamlit as st
-import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
@@ -15,13 +14,11 @@ html, body, [class*="css"] {
 }
 </style>
 """, unsafe_allow_html=True)
-
-st.set_page_config(page_title="극지식물 생육 대시보드", layout="wide")
+st.set_page_config(page_title="송도고등학교 그린3팀 결과", layout="wide")
 
 # ── CSV 읽기 (인코딩 자동 전환) ─────────────────────────────────────────
 @st.cache_data
 def read_csv(file):
-    """file.getvalue()로 바이트를 꺼내 인코딩 순회 시도."""
     data = file.getvalue()
     for enc in ("utf-8-sig", "cp949"):
         try:
@@ -86,55 +83,38 @@ def std_cols(df):
     return df
 
 def school_name_from_filename(filename):
-    """파일명에서 학교명 추출 (예: 송도고_환경데이터.csv → 송도고)."""
     base = os.path.basename(filename)
     m = re.match(r"^([가-힣A-Za-z0-9]+(?:고|중|초|대학교|학교)?)", base)
     return m.group(1) if m else "우리 학교"
 
-# ── 그래프 헬퍼 ─────────────────────────────────────────────────────────
-def plotly_layout(fig, title=None):
-    fig.update_layout(
-        font=dict(family="Malgun Gothic, Apple SD Gothic Neo, sans-serif"),
-        title=title,
-        margin=dict(l=40, r=20, t=50, b=40),
-        hovermode="closest",
-    )
-
-def bar_mean(df, col, title, color="#4CAF50"):
-    """평균 막대 그래프 (개체번호 제외, 값이 있는 행만)."""
-    d = df[[col]].dropna()
-    if len(d) < 1:
-        return None
-    fig = go.Figure()
-    fig.add_trace(go.Bar(x=list(range(1, len(d)+1)), y=d[col].values,
-                         marker_color=color, name=col))
-    fig.update_layout(
-        font=dict(family="Malgun Gothic, Apple SD Gothic Neo, sans-serif"),
-        title=title,
-        xaxis_title="개체 순번",
-        yaxis_title=col,
-        margin=dict(l=40, r=20, t=50, b=40),
-    )
-    return fig
-
-def scatter_with_trend(x, y, x_label, y_label, color="#2196F3"):
-    """산점도 + np.polyfit 추세선 (값 2개 미만이면 None)."""
+# ── 산점도 + 추세선 헬퍼 ─────────────────────────────────────────────────
+def scatter_trend(x, y, x_label, y_label, color="#2196F3"):
     xy = pd.DataFrame({"x": x, "y": y}).dropna()
     if len(xy) < 2:
         return None
     slope, intercept = np.polyfit(xy["x"], xy["y"], 1)
     pred = slope * xy["x"] + intercept
     r = np.corrcoef(xy["x"], xy["y"])[0, 1]
+    p_val = None
+    try:
+        from scipy import stats
+        _, p_val = stats.pearsonr(xy["x"], xy["y"])
+    except Exception:
+        pass
     fig = go.Figure()
     fig.add_trace(go.Scatter(x=xy["x"], y=xy["y"], mode="markers",
-                             marker=dict(color=color, size=7, opacity=0.8),
+                             marker=dict(color=color, size=8, opacity=0.85),
                              name="데이터"))
     fig.add_trace(go.Scatter(x=xy["x"], y=pred, mode="lines",
                              line=dict(color="red", width=2),
                              name=f"추세선 (r={r:.3f})"))
+    title = f"{x_label} vs {y_label}  (상관계수 r = {r:.3f}"
+    if p_val is not None:
+        title += f", p = {p_val:.4f}"
+    title += ")"
     fig.update_layout(
         font=dict(family="Malgun Gothic, Apple SD Gothic Neo, sans-serif"),
-        title=f"{x_label} vs {y_label}  (상관계수 r = {r:.3f})",
+        title=title,
         xaxis_title=x_label,
         yaxis_title=y_label,
         margin=dict(l=40, r=20, t=50, b=40),
@@ -142,421 +122,412 @@ def scatter_with_trend(x, y, x_label, y_label, color="#2196F3"):
     return fig
 
 # ════════════════════════════════════════════════════════════════════════
-#  사이드바: CSV 업로드
+#  사이드바
 # ════════════════════════════════════════════════════════════════════════
 st.sidebar.title("📁 데이터 업로드")
-
 env_file = st.sidebar.file_uploader("환경 데이터 CSV", type="csv")
 growth_file = st.sidebar.file_uploader("생육 결과 데이터 CSV", type="csv")
 
-growth_options = ["생중량(g)", "잎 수", "지상부 길이", "지하부 길이"]
-growth_sel = st.sidebar.multiselect(
-    "생육 측정 항목 선택 (Tab 3 그래프에서 사용)",
-    growth_options,
-    default=["생중량(g)", "잎 수", "지상부 길이", "지하부 길이"],
-)
-
-# ── 업로드된 파일 읽기 (한 번만, 캐싱 활용) ─────────────────────────────
 @st.cache_data
 def load_data(env_file, growth_file):
-    env_df = pd.DataFrame()
-    growth_df = pd.DataFrame()
+    env_df, growth_df = pd.DataFrame(), pd.DataFrame()
     school = "우리 학교"
     if env_file is not None:
         school = school_name_from_filename(env_file.name)
         env_df = std_cols(read_csv(env_file))
     if growth_file is not None:
-        school2 = school_name_from_filename(growth_file.name)
+        s2 = school_name_from_filename(growth_file.name)
         if school == "우리 학교":
-            school = school2
+            school = s2
         growth_df = std_cols(read_csv(growth_file))
     return env_df, growth_df, school
 
 with st.sidebar.spinner("데이터를 불러오는 중..."):
     env_df, growth_df, school = load_data(env_file, growth_file)
 
-st.sidebar.markdown(f"🏫 **{school}** 극지식물 대시보드")
-st.sidebar.caption(
-    "파일명 앞부분에서 학교명을 자동으로 읽어요. "
-    "다른 학교 CSV를 올려도 바로 동작합니다."
-)
+st.sidebar.markdown(f"🏫 **{school}** 극지식물 연구")
+st.sidebar.caption("파일명 앞부분에서 학교명을 자동으로 읽어요.")
 
 # ════════════════════════════════════════════════════════════════════════
 #  탭 구성
 # ════════════════════════════════════════════════════════════════════════
-tab1, tab2, tab3 = st.tabs(["📖 실험 개요", "🌡️ 환경 데이터", "📊 생육 결과"])
+tab1, tab2, tab3 = st.tabs(["📋 실험 소개", "📊 생육 데이터 값", "✅ 결과 및 가설 확인"])
 
 # ────────────────────────────────────────────────────────────────────────
-#  Tab 1 — 실험 개요
+#  Tab 1 — 실험 소개
 # ────────────────────────────────────────────────────────────────────────
 with tab1:
     try:
-        st.header("📖 실험 개요")
+        st.header("📋 실험 소개")
 
-        # 연구 배경 및 목적
-        col_bg, col_obj = st.columns([1, 2])
-        with col_bg:
-            st.markdown("""
-**연구 배경**
-극지식물은 낮은 온도와 적은 물에서도 살아남는 독특한 식물이에요.
-학교 실험실에서 키운 극지식물이 개체마다 얼마나 다르게 자라는지 알아보면,
-식물의 생존 전략을 이해하는 데 도움이 됩니다.
-""")
-        with col_obj:
+        col1, col2 = st.columns([1, 2])
+        with col1:
             st.markdown("""
 **연구 목적**
-1. 개체별 생중량 분포와 차이를 평균·표준편차·변동계수(CV)로 알아보기
-2. 잎 수·지상부 길이와 생중량의 관계를 상관계수·산점도로 확인하기
-3. 생중량 상위 25% 그룹과 하위 25% 그룹을 비교하기
+극지식물 개체마다 잎의 수와 지하부(뿌리) 질량이 어떻게 다른지 알아보고,
+두 특성 사이에 어떤 관계가 있는지 확인하는 실험입니다.
 
-> **통계 용어 간단 설명**
-> - **평균**: 모든 값을 더해 개수로 나눈 값 — 대표적인 중심 값
-> - **표준편차**: 값들이 평균에서 얼마나 퍼져 있는지 나타내는 수 — 클수록 차이가 큼
-> - **변동계수(CV)**: 표준편차를 평균으로 나눈 값(%) — 단위가 다른 그룹끼리 비교할 때 유용
-> - **상관계수(r)**: 두 값이 함께 움직이는 정도 — -1 ~ +1 사이, 0에 가까울수록 관계 약함
+**개체 수**
+- 업로드한 생육 CSV의 행 수가 곧 개체 수입니다.
+- 아래 데이터 요약에서 자동으로 표시됩니다.
+""")
+        with col2:
+            st.markdown("""
+**연구 가설**
+> "지하부 질량이 무거울수록(뿌리가 더 많이 자랄수록) 잎의 개수가 많을 것이다."
+
+이 가설은 식물이 뿌리를 통해 물과 양분을 흡수하므로,
+뿌리가 잘 발달한 개체일수록 잎도 더 많이 낼 것이라는 생각에서 출발합니다.
+
+이 가설이 실제로 맞는지 아래 분석에서 확인해 봅니다.
 """)
 
-        # 데이터 요약 표
-        if env_df.empty and growth_df.empty:
-            st.info("📁 사이드바에서 CSV 파일을 올려주세요. 업로드하면 아래 내용이 자동으로 채워집니다.")
+        # 데이터 요약
+        st.subheader("📋 데이터 요약")
+        if growth_df.empty and env_df.empty:
+            st.info("📁 사이드바에서 CSV 파일을 올려주세요.")
         else:
-            summary_rows = []
-            if growth_df is not None and not growth_df.empty:
-                n_growth = len(growth_df)
-                growth_cols = [c for c in ["생중량", "잎 수", "지상부 길이", "지하부 길이"] if c in growth_df.columns]
-                summary_rows.append(["생육 결과 데이터", f"{n_growth}개체", ", ".join(growth_cols) if growth_cols else "없음"])
-            if env_df is not None and not env_df.empty:
-                time_col = "time" if "time" in env_df.columns else None
-                if time_col:
-                    t_min = env_df[time_col].min()
-                    t_max = env_df[time_col].max()
-                    period = f"{t_min.strftime('%Y-%m-%d')} ~ {t_max.strftime('%Y-%m-%d')}"
-                else:
-                    period = "확인 불가"
-                env_cols = [c for c in ["temperature", "humidity", "ph", "ec"] if c in env_df.columns]
-                summary_rows.append(["환경 데이터", f"{len(env_df)}행", f"측정 기간: {period}  |  항목: {', '.join(env_cols) if env_cols else '없음'}"])
-
-            if summary_rows:
-                st.subheader("📋 데이터 요약")
-                st.dataframe(pd.DataFrame(summary_rows, columns=["데이터", "규모", "측정 항목 / 기간"]),
+            rows = []
+            if not growth_df.empty:
+                n = len(growth_df)
+                cols_str = ", ".join(
+                    [c for c in ["잎 수", "지상부 길이", "지하부 길이",
+                                 "생중량", "지상부 질량", "지하부 질량"]
+                     if c in growth_df.columns]
+                )
+                rows.append(["생육 결과 데이터", f"{n}개체", cols_str])
+            if not env_df.empty:
+                env_cols = [c for c in ["temperature", "humidity", "ph", "ec"]
+                            if c in env_df.columns]
+                rows.append(["환경 데이터", f"{len(env_df)}행",
+                             ", ".join(env_cols) if env_cols else "없음"])
+            if rows:
+                st.dataframe(pd.DataFrame(rows, columns=["데이터", "규모", "열"]),
                              width="stretch", hide_index=True)
-
-        # 주요 지표 카드 4개
-        st.subheader("📊 주요 지표")
-        m1, m2, m3, m4 = st.columns(4)
-
-        # 총 개체수
-        if not growth_df.empty and "개체번호" in growth_df.columns:
-            m1.metric("총 개체수", f"{len(growth_df)}개체")
-        else:
-            m1.metric("총 개체수", "—")
-
-        # 평균 온도
-        if not env_df.empty and "temperature" in env_df.columns:
-            t_mean = env_df["temperature"].dropna().mean()
-            if t_mean == t_mean:  # NaN 체크
-                m2.metric("평균 온도", f"{t_mean:.1f} °C")
-            else:
-                m2.metric("평균 온도", "—")
-        else:
-            m2.metric("평균 온도", "—")
-
-        # 평균 습도
-        if not env_df.empty and "humidity" in env_df.columns:
-            h_mean = env_df["humidity"].dropna().mean()
-            if h_mean == h_mean:
-                m3.metric("평균 습도", f"{h_mean:.1f} %")
-            else:
-                m3.metric("평균 습도", "—")
-        else:
-            m3.metric("평균 습도", "—")
-
-        # 평균 생중량
-        if not growth_df.empty and "생중량" in growth_df.columns:
-            gw_mean = growth_df["생중량"].dropna().mean()
-            if gw_mean == gw_mean:
-                m4.metric("평균 생중량", f"{gw_mean:.3f} g")
-            else:
-                m4.metric("평균 생중량", "—")
-        else:
-            m4.metric("평균 생중량", "—")
-
     except Exception as e:
         st.warning(f"⚠️ 이 부분은 데이터 형식 때문에 표시하지 못했어요: {e}")
 
 # ────────────────────────────────────────────────────────────────────────
-#  Tab 2 — 환경 데이터
+#  Tab 2 — 생육 데이터 값 (t 계산, 산점도, 막대·꺾은선)
 # ────────────────────────────────────────────────────────────────────────
 with tab2:
     try:
-        st.header("🌡️ 환경 데이터")
-        if env_df.empty:
-            st.info("환경 데이터 CSV를 업로드하면 환경 요약·시계열 그래프가 표시됩니다.")
+        st.header("📊 생육 데이터 값")
+
+        if growth_df.empty:
+            st.info("생육 결과 CSV를 업로드하면 분석이 표시됩니다.")
         else:
-            # 환경 요약 표 (있는 열만)
-            env_num_cols = [c for c in ["temperature", "humidity", "ph", "ec", "water_temp", "co2"]
-                            if c in env_df.columns]
-            if env_num_cols:
-                st.subheader("📋 환경 요약 (평균 · 최소 · 최대)")
-                summary = pd.DataFrame({
-                    "항목": env_num_cols,
-                    "평균": [round(env_df[c].dropna().mean(), 3) for c in env_num_cols],
-                    "최소": [round(env_df[c].dropna().min(), 3) for c in env_num_cols],
-                    "최대": [round(env_df[c].dropna().max(), 3) for c in env_num_cols],
-                })
-                st.dataframe(summary, width="stretch", hide_index=True)
+            below_col = "지하부 질량"
+            leaf_col = "잎 수"
 
-            # 일별 시계열
-            if "time" in env_df.columns:
-                st.subheader("📈 날짜별 시계열 (일별 평균)")
-                env_df["date"] = env_df["time"].dt.date
+            # ── 분석에 필요한 열 존재 확인 ─────────────────────────────
+            if below_col not in growth_df.columns or leaf_col not in growth_df.columns:
+                st.info(f"지하부 질량({below_col})과 잎 수({leaf_col}) 열이 모두 필요합니다. "
+                        "업로드한 CSV에 해당 열이 있는지 확인해주세요.")
+            else:
+                # ── 1단계: 각 개체의 지하부 질량·잎 수에서 평균 뺀 절댓값 → t ──
+                gw = growth_df[below_col].dropna()
+                lf = growth_df[leaf_col].dropna()
+                # 두 열이 같은 행 인덱스를 공유하도록 교집합
+                common = gw.index.intersection(lf.index)
+                gw_c = gw.loc[common]
+                lf_c = lf.loc[common]
 
-                temp_daily = env_df.groupby("date")["temperature"].mean() if "temperature" in env_df.columns else None
-                hum_daily = env_df.groupby("date")["humidity"].mean() if "humidity" in env_df.columns else None
-                ph_daily = env_df.groupby("date")["ph"].mean() if "ph" in env_df.columns else None
-                ec_daily = env_df.groupby("date")["ec"].mean() if "ec" in env_df.columns else None
+                if len(gw_c) < 2 or len(lf_c) < 2:
+                    st.info("데이터가 부족해 분석을 건너뛰었습니다.")
+                else:
+                    mean_below = gw_c.mean()
+                    mean_leaf = lf_c.mean()
 
-                fig_timeline = make_subplots(
-                    rows=2, cols=1, shared_xaxes=True,
-                    vertical_spacing=0.12,
-                    subplot_titles=("온도 · 습도 변화", "pH · EC 변화 (있는 경우만)"),
-                )
+                    # 개체별 편차 절댓값
+                    abs_below = (gw_c - mean_below).abs()
+                    abs_leaf = (lf_c - mean_leaf).abs()
 
-                color_temp, color_hum = "#FF5722", "#2196F3"
-                if temp_daily is not None:
-                    fig_timeline.add_trace(
-                        go.Scatter(x=temp_daily.index, y=temp_daily.values,
-                                   mode="lines", name="평균 온도 (°C)",
-                                   line=dict(color=color_temp, width=2)),
-                        row=1, col=1)
-                if hum_daily is not None:
-                    fig_timeline.add_trace(
-                        go.Scatter(x=hum_daily.index, y=hum_daily.values,
-                                   mode="lines", name="평균 습도 (%)",
-                                   line=dict(color=color_hum, width=2),
-                                   yaxis="y2"),
-                        row=1, col=1)
+                    # t = 두 절댓값의 평균 (개체별)
+                    t_per = (abs_below + abs_leaf) / 2.0
 
-                if temp_daily is not None or hum_daily is not None:
-                    fig_timeline.update_yaxes(title_text="°C / %", row=1, col=1)
-                    if temp_daily is not None and hum_daily is not None:
-                        fig_timeline.update_yaxes(title_text="%", row=1, col=1, secondary_y=True)
+                    # t의 전체 평균
+                    t_mean = t_per.mean()
 
-                color_ph, color_ec = "#9C27B0", "#4CAF50"
-                if ph_daily is not None:
-                    fig_timeline.add_trace(
-                        go.Scatter(x=ph_daily.index, y=ph_daily.values,
-                                   mode="lines", name="평균 pH",
-                                   line=dict(color=color_ph, width=2, dash="dot")),
-                        row=2, col=1)
-                if ec_daily is not None:
-                    fig_timeline.add_trace(
-                        go.Scatter(x=ec_daily.index, y=ec_daily.values,
-                                   mode="lines", name="평균 EC (mS/cm)",
-                                   line=dict(color=color_ec, width=2)),
-                        row=2, col=1)
+                    # ── 결과 카드 ────────────────────────────────────────
+                    st.subheader("📐 t 값 계산 요약")
+                    m1, m2, m3 = st.columns(3)
+                    m1.metric("지하부 질량 평균", f"{mean_below:.4f} g")
+                    m2.metric("잎 수평균", f"{mean_leaf:.1f} 장")
+                    m3.metric("t 평균 (개체 편차 평균)",
+                              f"{t_mean:.4f}")
 
-                fig_timeline.update_layout(
-                    font=dict(family="Malgun Gothic, Apple SD Gothic Neo, sans-serif"),
-                    margin=dict(l=40, r=20, t=50, b=40),
-                    hovermode="x unified",
-                )
-                st.plotly_chart(fig_timeline, width="stretch")
-
-            # Expander: 원본 테이블 + CSV 다운로드
-            with st.expander("📄 환경 데이터 원본 테이블 + CSV 다운로드"):
-                if not env_df.empty:
-                    disp = env_df.copy()
-                    # 시간 열은 string으로 표시
-                    if "time" in disp.columns:
-                        disp["time"] = disp["time"].astype(str)
-                    st.dataframe(disp, width="stretch", hide_index=True)
-                    csv_bytes = disp.to_csv(index=False).encode("utf-8-sig")
-                    st.download_button(
-                        label="⬇ 환경 데이터 CSV 다운로드",
-                        data=csv_bytes,
-                        file_name=f"{school}_환경데이터.csv",
-                        mime="text/csv",
+                    st.caption(
+                        "• t = (|지하부질량−평균| + |잎수−평균|) ÷ 2  — "
+                        "개체가 평균에서 얼마나 떨어져 있는지 나타내는 값\n"
+                        "• t가 작을수록 평균에 가까운 '보통' 개체, 클수록 눈에 띄는 개체"
                     )
+
+                    # ── 2-1: t의 분포 산점도 (x=개체 순번, y=t) ──────────
+                    st.subheader("📈 개체별 t 값 분포 (산점도)")
+                    idx_sorted = t_per.sort_index()
+                    fig_t = go.Figure()
+                    fig_t.add_trace(go.Scatter(
+                        x=list(range(1, len(idx_sorted)+1)),
+                        y=idx_sorted.values,
+                        mode="markers+lines",
+                        marker=dict(color="#FF9800", size=8),
+                        line=dict(color="#FF9800", width=1.5, dash="dot"),
+                        name="t 값",
+                    ))
+                    fig_t.add_hline(y=t_mean, line_dash="dash", line_color="red",
+                                    annotation_text=f"t 평균 = {t_mean:.4f}",
+                                    annotation_position="top right")
+                    fig_t.update_layout(
+                        font=dict(family="Malgun Gothic, Apple SD Gothic Neo, sans-serif"),
+                        title="개체별 t 값 (점선 = t 전체 평균)",
+                        xaxis_title="개체 순번",
+                        yaxis_title="t (편차 평균)",
+                        margin=dict(l=40, r=20, t=50, b=40),
+                    )
+                    st.plotly_chart(fig_t, width="stretch")
+
+                    # ── 2-2: 막대 그래프 — 각 개체 t vs t 평균 ────────────
+                    st.subheader("📊 개체별 t vs t 평균 (막대 그래프)")
+                    fig_bar = go.Figure()
+                    t_vals = idx_sorted.values
+                    colors_bar = [
+                        "#4CAF50" if v <= t_mean else "#F44336"
+                        for v in t_vals
+                    ]
+                    fig_bar.add_trace(go.Bar(
+                        x=list(range(1, len(t_vals)+1)),
+                        y=t_vals,
+                        marker_color=colors_bar,
+                        name="개체별 t",
+                    ))
+                    fig_bar.add_hline(y=t_mean, line_dash="dash", line_color="black",
+                                      annotation_text="t 평균", annotation_position="top right")
+                    fig_bar.update_layout(
+                        font=dict(family="Malgun Gothic, Apple SD Gothic Neo, sans-serif"),
+                        title="개체별 t 값 — 🟢 평균 이하 · 🔴 평균 초과",
+                        xaxis_title="개체 순번",
+                        yaxis_title="t",
+                        margin=dict(l=40, r=20, t=50, b=40),
+                    )
+                    st.plotly_chart(fig_bar, width="stretch")
+
+                    # ── 2-3: 꺾은선 그래프 — t 평균에서 각 개체 t까지 거리 ──
+                    st.subheader("📉 t 평균 대비 각 개체 t 위치 (꺾은선 그래프)")
+                    fig_line = go.Figure()
+                    fig_line.add_hline(y=t_mean, line_dash="dash", line_color="gray",
+                                       annotation_text="t 평균", annotation_position="top right")
+                    # 평균 선에서 각 개체 t로 가는 선분
+                    for i, (pos, tv) in enumerate(zip(range(1, len(t_vals)+1), t_vals)):
+                        fig_line.add_trace(go.Scatter(
+                            x=[pos, pos], y=[t_mean, tv],
+                            mode="lines",
+                            line=dict(color="#90CAF9", width=1.5),
+                            showlegend=False,
+                        ))
+                    # 개체 t 점
+                    fig_line.add_trace(go.Scatter(
+                        x=list(range(1, len(t_vals)+1)),
+                        y=t_vals,
+                        mode="markers",
+                        marker=dict(color="#1565C0", size=9),
+                        name="개체 t",
+                    ))
+                    fig_line.add_trace(go.Scatter(
+                        x=[0], y=[t_mean],
+                        mode="markers",
+                        marker=dict(color="gray", size=12, symbol="diamond"),
+                        name="t 평균",
+                    ))
+                    fig_line.update_layout(
+                        font=dict(family="Malgun Gothic, Apple SD Gothic Neo, sans-serif"),
+                        title="t 평균(회색 마름모)에서 각 개체 t(파란 점)까지의 거리",
+                        xaxis_title="개체 순번",
+                        yaxis_title="t",
+                        margin=dict(l=40, r=20, t=50, b=40),
+                        showlegend=True,
+                    )
+                    st.plotly_chart(fig_line, width="stretch")
+
+                    # ── 3: 지하부 질량 vs 잎 수 산점도 + 추세선 ──────────
+                    st.subheader("🔗 지하부 질량 vs 잎 수 (상관계수·추세선)")
+                    fig_corr = scatter_trend(gw_c, lf_c,
+                                             "지하부 질량 (g)", "잎 수 (장)",
+                                             color="#2196F3")
+                    if fig_corr is not None:
+                        st.plotly_chart(fig_corr, width="stretch")
+                    else:
+                        st.info("데이터가 부족해 상관관계 산점도를 그리지 못했습니다.")
+
+                    # ── 상관계수 수치 카드 ────────────────────────────────
+                    r_val = np.corrcoef(gw_c, lf_c)[0, 1]
+                    p_val = None
+                    try:
+                        from scipy import stats
+                        _, p_val = stats.pearsonr(gw_c, lf_c)
+                    except Exception:
+                        pass
+                    st.subheader("📐 상관계수 요약")
+                    r_col, p_col = st.columns(2)
+                    r_col.metric("상관계수 r", f"{r_val:.4f}")
+                    if p_val is not None:
+                        sig = "✅ 통계적으로 유의" if p_val < 0.05 else "⚠️ 유의하지 않음 (p ≥ 0.05)"
+                        p_col.metric("p 값", f"{p_val:.4f}", delta=sig)
+                    else:
+                        p_col.metric("p 값", "계산 불가")
+                    st.info(
+                        "상관계수 r은 -1 ~ +1 사이 값입니다. "
+                        "+1에 가까울수록 두 값이 함께 증가(정방향), "
+                        "-1에 가까울수록 한쪽 증가 시 다른 쪽 감소(역방향), "
+                        "0에 가까우면 관계가 약합니다."
+                    )
+
+        # ── Expander: 생육 원본 + CSV 다운로드 ─────────────────────────
+        with st.expander("📄 생육 데이터 원본 테이블 + CSV 다운로드"):
+            if not growth_df.empty:
+                disp = growth_df.copy()
+                if "개체번호" in disp.columns:
+                    disp["개체번호"] = disp["개체번호"].apply(
+                        lambda v: int(v) if isinstance(v, float) and v == int(v) else v
+                    )
+                st.dataframe(disp, width="stretch", hide_index=True)
+                csv_b = disp.to_csv(index=False).encode("utf-8-sig")
+                st.download_button(
+                    label="⬇ 생육 결과 CSV 다운로드",
+                    data=csv_b,
+                    file_name=f"{school}_생육결과데이터.csv",
+                    mime="text/csv",
+                )
     except Exception as e:
         st.warning(f"⚠️ 이 부분은 데이터 형식 때문에 표시하지 못했어요: {e}")
 
 # ────────────────────────────────────────────────────────────────────────
-#  Tab 3 — 생육 결과
+#  Tab 3 — 결과 및 가설 확인
 # ────────────────────────────────────────────────────────────────────────
 with tab3:
     try:
-        st.header("📊 생육 결과")
+        st.header("✅ 결과 및 가설 확인")
+
         if growth_df.empty:
-            st.info("생육 결과 CSV를 업로드하면 생육 분석 그래프가 표시됩니다.")
+            st.info("생육 결과 CSV를 업로드하면 결과 해석이 표시됩니다.")
         else:
-            gw_col = "생중량"
+            below_col = "지하부 질량"
             leaf_col = "잎 수"
-            above_col = "지상부 길이"
-            below_col = "지하부 길이"
-            above_mass_col = "지상부 질량"
-            below_mass_col = "지하부 질량"
 
-            # ── 🥇 핵심 결과 카드 ──────────────────────────────────────
-            st.subheader("🥇 핵심 결과")
-            if gw_col in growth_df.columns:
-                gw_clean = growth_df[gw_col].dropna()
-                if len(gw_clean) >= 1:
-                    gw_mean = gw_clean.mean()
-                    gw_max_val = gw_clean.max()
-                    gw_min_val = gw_clean.min()
-                    idx_max = gw_clean.idxmax()
-                    idx_min = gw_clean.idxmin()
-                    max_id = growth_df.loc[idx_max, "개체번호"] if "개체번호" in growth_df.columns else "?"
-                    min_id = growth_df.loc[idx_min, "개체번호"] if "개체번호" in growth_df.columns else "?"
+            if below_col not in growth_df.columns or leaf_col not in growth_df.columns:
+                st.info(f"지하부 질량({below_col})과 잎 수({leaf_col}) 열이 모두 필요합니다.")
+            else:
+                gw = growth_df[below_col].dropna()
+                lf = growth_df[leaf_col].dropna()
+                common = gw.index.intersection(lf.index)
+                gw_c = gw.loc[common]
+                lf_c = lf.loc[common]
 
-                    c_max, c_mean, c_min = st.columns(3)
-                    c_mean.metric("평균 생중량", f"{gw_mean:.3f} g")
-                    c_max.metric("최대 생중량", f"{gw_max_val:.3f} g",
-                                 delta=f"개체 {max_id}")
-                    c_min.metric("최소 생중량", f"{gw_min_val:.3f} g",
-                                 delta=f"개체 {min_id}")
+                if len(gw_c) < 2:
+                    st.info("데이터가 부족해 가설 확인을 건너뛰었습니다.")
                 else:
-                    st.info("생중량 데이터가 없습니다.")
-            else:
-                st.info("생중량(g) 열이 없어 핵심 결과 카드를 표시할 수 없습니다.")
+                    r_val = np.corrcoef(gw_c, lf_c)[0, 1]
+                    p_val = None
+                    try:
+                        from scipy import stats
+                        _, p_val = stats.pearsonr(gw_c, lf_c)
+                    except Exception:
+                        pass
 
-            # ── 개체별 생육 비교 (막대 그래프) ──────────────────────────
-            st.subheader("📈 개체별 생육 비교")
-            plot_cols = [c for c in [gw_col, leaf_col, above_col, below_col] if c in growth_df.columns]
-            plot_cols = [c for c in growth_sel if c in plot_cols] if growth_sel else plot_cols
-            if plot_cols:
-                for col in plot_cols:
-                    d = growth_df[[col]].dropna()
-                    if len(d) < 1:
-                        continue
-                    # 생중량은 상위·하위 25%를 다른 색으로
-                    if col == gw_col:
-                        q1 = d[gw_col].quantile(0.25)
-                        q3 = d[gw_col].quantile(0.75)
-                        colors = [
-                            "#F44336" if v <= q1 else
-                            "#4CAF50" if v >= q3 else
-                            "#90CAF9"
-                            for v in d[gw_col]
-                        ]
-                        fig = go.Figure()
-                        fig.add_trace(go.Bar(
-                            x=list(range(1, len(d)+1)),
-                            y=d[gw_col].values,
-                            marker_color=colors,
-                            name=col,
-                        ))
-                        fig.update_layout(
-                            font=dict(family="Malgun Gothic, Apple SD Gothic Neo, sans-serif"),
-                            title=f"{col} — 개체별 (🔴 하위 25% · 🟢 상위 25% 강조)",
-                            xaxis_title="개체 순번",
-                            yaxis_title=col,
-                            margin=dict(l=40, r=20, t=50, b=40),
-                        )
-                    else:
-                        fig = go.Figure()
-                        fig.add_trace(go.Bar(
-                            x=list(range(1, len(d)+1)),
-                            y=d[col].values,
-                            marker_color="#7E57C2",
-                            name=col,
-                        ))
-                        fig.update_layout(
-                            font=dict(family="Malgun Gothic, Apple SD Gothic Neo, sans-serif"),
-                            title=f"{col} — 개체별",
-                            xaxis_title="개체 순번",
-                            yaxis_title=col,
-                            margin=dict(l=40, r=20, t=50, b=40),
-                        )
-                    st.plotly_chart(fig, width="stretch")
-            else:
-                st.info("선택한 생육 측정 항목이 데이터에 없습니다.")
-
-            # ── 생중량 분포 (박스플롯) ──────────────────────────────────
-            if gw_col in growth_df.columns:
-                gw_clean = growth_df[gw_col].dropna()
-                if len(gw_clean) >= 3:
-                    fig_box = go.Figure()
-                    fig_box.add_trace(go.Box(
-                        y=gw_clean.values,
-                        name="생중량",
-                        fillcolor="#4CAF50",
-                        marker=dict(color="#4CAF50"),
-                        boxpoints="outliers",
-                    ))
-                    fig_box.update_layout(
-                        font=dict(family="Malgun Gothic, Apple SD Gothic Neo, sans-serif"),
-                        title="생중량 분포 (박스플롯) — 상자 안 선이 중앙값",
-                        yaxis_title="생중량 (g)",
-                        margin=dict(l=40, r=20, t=50, b=40),
-                    )
-                    st.plotly_chart(fig_box, width="stretch")
-                else:
-                    st.info("생중량 데이터 수가 적어 박스플롯을 그리지 못했습니다.")
-            else:
-                st.info("생중량(g) 열이 없어 박스플롯을 그릴 수 없습니다.")
-
-            # ── 상관관계 분석 (산점도 2개 + 추세선) ────────────────────
-            st.subheader("🔗 상관관계 분석")
-            corr_pairs = []
-            if gw_col in growth_df.columns:
-                if leaf_col in growth_df.columns:
-                    corr_pairs.append((leaf_col, gw_col, "잎 수", "생중량 (g)"))
-                if above_col in growth_df.columns:
-                    corr_pairs.append((above_col, gw_col, "지상부 길이", "생중량 (g)"))
-
-            if corr_pairs:
-                for x_col, y_col, x_lbl, y_lbl in corr_pairs:
-                    x = growth_df[x_col]
-                    y = growth_df[y_col]
-                    fig_corr = scatter_with_trend(x, y, x_lbl, y_lbl, color="#2196F3")
-                    if fig_corr is not None:
-                        st.plotly_chart(fig_corr, width="stretch")
-                    else:
-                        st.info(f"{x_lbl} vs {y_lbl} — 데이터가 부족해 상관분석을 건너뛰었습니다.")
-            else:
-                st.info("생중량과 비교할 잎 수·지상부 길이 열이 없습니다.")
-
-            # ── 분산/변동계수 정보 카드 ─────────────────────────────────
-            st.subheader("📐 개체별 차이 지표")
-            if gw_col in growth_df.columns:
-                gw_clean = growth_df[gw_col].dropna()
-                if len(gw_clean) >= 2:
-                    mean_v = gw_clean.mean()
-                    std_v = gw_clean.std()
-                    cv_v = (std_v / mean_v * 100) if mean_v != 0 else 0
-                    info_box = st.container(border=True)
-                    info_box.markdown(f"""
-**생중량 변동 요약**
-| 지표 | 값 | 의미 |
-|------|----|------|
-| 평균 | {mean_v:.3f} g | 개체들의 대표 생중량 |
-| 표준편차 | {std_v:.3f} g | 평균에서 얼마나 퍼져 있는지 |
-| 변동계수(CV) | {cv_v:.1f}% | 단위 없는 비교용 퍼진 정도 |
-| 범위 | {gw_clean.min():.3f} ~ {gw_clean.max():.3f} g | 가장 작은 개체와 큰 개체 차이 |
+                    # ── 가설 판정 ──────────────────────────────────────────
+                    st.subheader("🔬 가설 검토")
+                    hyp_col1, hyp_col2 = st.columns(2)
+                    with hyp_col1:
+                        st.markdown("""
+**가설**
+> "지하부 질량이 무거울수록 잎의 개수가 많을 것이다."
 """)
-                else:
-                    st.info("생중량 데이터 수가 적어 변동계수를 계산하지 못했습니다.")
-            else:
-                st.info("생중량(g) 열이 없어 변동 요약표를 표시할 수 없습니다.")
+                    with hyp_col2:
+                        if p_val is not None and p_val < 0.05:
+                            direction = "정방향" if r_val > 0 else "역방향"
+                            verdict = (
+                                f"✅ 가설이 **지지됨** (p < 0.05, r = {r_val:.3f}, {direction})"
+                                if r_val > 0 else
+                                f"❌ 가설이 **기각됨** — 오히려 역방향 관계 (r = {r_val:.3f})"
+                            )
+                        elif p_val is not None:
+                            verdict = (
+                                f"⚠️ **유의하지 않음** (p = {p_val:.3f} ≥ 0.05) — "
+                                "이 데이터만으로는 가설의 옳고 그름을 단정하기 어려움"
+                            )
+                        else:
+                            verdict = (
+                                f"상관계수 r = {r_val:.3f} — "
+                                "p 값을 계산할 수 없어 통계적 유의성은 판단 불가"
+                            )
+                        st.markdown(f"""
+**판단 결과**
+{verdict}
+""")
 
-            # ── Expander: 생육 원본 + CSV 다운로드 ─────────────────────
-            with st.expander("📄 생육 데이터 원본 테이블 + CSV 다운로드"):
-                if not growth_df.empty:
-                    disp_g = growth_df.copy()
-                    if "개체번호" in disp_g.columns:
-                        # 개체번호를 원래 값 그대로 표시 (소수점 제거)
-                        disp_g["개체번호"] = disp_g["개체번호"].apply(
-                            lambda v: int(v) if isinstance(v, float) and v == int(v) else v
+                    # ── 가설이 틀렸을 때 원인 분석 ────────────────────────
+                    if r_val <= 0 or (p_val is not None and p_val >= 0.05):
+                        st.subheader("🔍 가설이 맞지 않을 수 있는 원인")
+                        st.markdown("""
+지하부 질량과 잎 수 사이에 뚜렷한 정방향 관계가 나타나지 않은 이유는
+다음과 같이 생각해볼 수 있습니다.
+
+1. **지하부 질량이 잎 수를 직접 결정하지 않을 수 있음**
+   잎의 수는 유전, 광량, 생장 단계, 호르몬 등 여러 요인의 영향을 받아요.
+   뿌리 질량만으로 잎 수를 예측하기는 어렵습니다.
+
+2. **개체 간 생장 단계가 다를 수 있음**
+   아직 어린 개체는 잎이 적어도 뿌리가 먼저 자라고,
+   성숙한 개체는 잎이 많지만 뿌리 성장이 둔화되었을 수 있어요.
+   같은 시기에 측정했더라도 실제 발달 단계는 다를 수 있습니다.
+
+3. **환경이 개체마다 균일하지 않았을 수 있음**
+   같은 실험실 안에서도 위치에 따라 빛·온도·수분 조건이 조금씩 다를 수 있고,
+   이것이 뿌리 성장과 잎 수에 서로 다른 영향을 주었을 수 있습니다.
+
+4. **측정 개체 수가 적거나 편차가 클 수 있음**
+   상관계수는 데이터가 적고 편차가 크면 불안정해집니다.
+   81개체라도 개체 간 차이가 매우 크면 r이 작게 나올 수 있어요.
+
+5. **두 변수가 서로 다른 '자원 배분 전략'을 반영할 수 있음**
+   어떤 개체는 뿌리(지하부)에 자원을 많이 투자하고 잎은 적게 내는 전략,
+   다른 개체는 잎을 많이 내되 뿌리는 적게 키우는 전략을 취할 수 있어요.
+   이 경우 두 값은 오히려 역방향이거나 무관할 수 있습니다.
+""")
+                    else:
+                        st.markdown("""
+**해석**
+상관계수 r이 양수이고 통계적으로 유의하므로,
+이 데이터에서는 "지하부 질량이 무거울수록 잎 수가 많다"는 가설이
+ 지지된다고 볼 수 있습니다.
+
+다만 상관관계는 인과관계를 보장하지 않으므로,
+"뿌리가 무거워서 잎이 많아졌다"라고 단정하기보다는
+"두 특성이 함께 커지는 경향이 관찰되었다"고 해석하는 것이 적절합니다.
+""")
+
+                    # ── 종합 정리 ─────────────────────────────────────────
+                    st.subheader("📋 종합 결과")
+                    total_col1, total_col2 = st.columns(2)
+                    with total_col1:
+                        st.dataframe(
+                            pd.DataFrame({
+                                "지표": ["개체 수", "지하부 질량 평균 (g)",
+                                         "잎 수평균 (장)", "상관계수 r"],
+                                "값": [str(len(gw_c)),
+                                       f"{gw_c.mean():.4f}",
+                                       f"{lf_c.mean():.1f}",
+                                       f"{r_val:.4f}"],
+                            }),
+                            width="stretch", hide_index=True,
                         )
-                    st.dataframe(disp_g, width="stretch", hide_index=True)
-                    csv_bytes_g = disp_g.to_csv(index=False).encode("utf-8-sig")
-                    st.download_button(
-                        label="⬇ 생육 결과 CSV 다운로드",
-                        data=csv_bytes_g,
-                        file_name=f"{school}_생육결과데이터.csv",
-                        mime="text/csv",
-                    )
+                    with total_col2:
+                        st.markdown(f"""
+**한 줄 요약**
+- 총 {len(gw_c)}개체를 분석한 결과,
+- 지하부 질량과 잎 수의 상관계수는 **r = {r_val:.3f}**
+  {'(정방향)' if r_val > 0 else '(역방향 또는 무관)'}
+- {'가설 지지' if (r_val > 0 and p_val is not None and p_val < 0.05) else '가설 지지 불명확 또는 기각'}
+""")
     except Exception as e:
         st.warning(f"⚠️ 이 부분은 데이터 형식 때문에 표시하지 못했어요: {e}")
