@@ -3,7 +3,6 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 import plotly.graph_objects as go
-from plotly.subplots import make_subplots
 
 # ── 한글 폰트 (Streamlit) ──────────────────────────────────────────────
 st.markdown("""
@@ -27,7 +26,7 @@ def read_csv(file):
             pass
     return pd.DataFrame()
 
-# ── 열 이름 표준화 (KeyError 방지) ──────────────────────────────────────
+# ── 열 이름 표준화 ─────────────────────────────────────────────────────
 def std_cols(df):
     df = df.copy()
     df.columns = [str(c).strip() for c in df.columns]
@@ -95,9 +94,7 @@ TFONTC    = "#111111"
 GRIDC     = "#E8E0DA"
 ZEROC     = "#CCCCCC"
 HOVBG     = "#FFF8F0"
-INK       = "rgba(0,0,0,0.08)"   # 결측 셀 배경
 
-# ── 헬퍼: hline + 주석 ────────────────────────────────────────────────
 def add_hline_annot(fig, y, color, label, size=12):
     fig.add_hline(y=y, line_dash="dash", line_color=color, line_width=2)
     fig.add_annotation(
@@ -108,7 +105,6 @@ def add_hline_annot(fig, y, color, label, size=12):
                   color=color, size=size),
     )
 
-# ── 공통 레이아웃 ─────────────────────────────────────────────────────
 def base_layout(fig, title, x_title, y_title, bg=BG_PINK):
     fig.update_layout(
         font=dict(family="Malgun Gothic, Apple SD Gothic Neo, sans-serif",
@@ -142,42 +138,47 @@ def base_layout(fig, title, x_title, y_title, bg=BG_PINK):
     )
     return fig
 
-# ── 개체별 편차 막대차트 (평균 대비 위/아래, 색 진하기 = 편차 크기) ─
-def dev_bar_chart(values, mean_val, title, y_label, color_low="#AED6F1",
-                   color_high="#E74C3C"):
-    """values: 개체별 값 배열. 평균 이하=파랑, 초과=빨강.
-       색 진하기 = |값-평균|이 클수록 진해짐."""
-    vals = np.array(values, dtype=float)
-    dev = np.abs(vals - mean_val)
-    if dev.max() == 0:
-        dev_norm = np.zeros_like(dev)
-    else:
-        dev_norm = dev / dev.max()   # 0~1 정규화
+# ── 9x9 그리드: Plotly 히트맵 ─────────────────────────────────────────
+def make_9x9_heatmap(values, mean_val, title, color_low, color_high,
+                      unit, value_fmt):
+    """values: 1차원 배열(81개). 9x9 그리드로 재배열 후 히트맵.
+       color_low→color_high로 편차 클수록 진하게."""
+    n = len(values)
+    side = int(np.ceil(np.sqrt(n)))
+    # 9x9 배열 (없으면 NaN)
+    grid = np.full((side, side), np.nan)
+    dev = np.abs(values - mean_val)
+    vmax = dev.max() if dev.max() > 0 else 1.0
+    norm = dev / vmax
+    for i in range(n):
+        r, c = divmod(i, side)
+        grid[r, c] = norm[i]
 
-    colors = []
-    for v, dn in zip(vals, dev_norm):
-        base = color_low if v <= mean_val else color_high
-        # 색이 진할수록 편차 큼 — 불투명도로 표현
-        alpha = 0.25 + 0.70 * dn
-        colors.append(base if isinstance(base, str) else base)
-    # plotly는 rgba 문자열 직접 지원
-    rgba_colors = []
-    for v, dn in zip(vals, dev_norm):
-        base_rgb = (174, 214, 241) if v <= mean_val else (231, 76, 60)
-        alpha = 0.30 + 0.68 * dn
-        rgba_colors.append(f"rgba({base_rgb[0]},{base_rgb[1]},{base_rgb[2]},{alpha:.2f})")
+    # 텍스트 레이블 배열
+    text_arr = np.full((side, side), "", dtype=object)
+    for i in range(n):
+        r, c = divmod(i, side)
+        orig_idx = i
+        text_arr[r, c] = f"{orig_idx+1}"
 
     fig = go.Figure()
-    fig.add_trace(go.Bar(
-        x=list(range(1, len(vals) + 1)),
-        y=vals,
-        marker=dict(color=rgba_colors, line=dict(width=0.6, color="white"),
-                    opacity=0.95),
-        name="개체별 값",
-        hovertemplate="%{x}번 개체<br>%{y:.4f}<extra></extra>",
+    fig.add_trace(go.Heatmap(
+        z=grid,
+        text=text_arr,
+        texttemplate="%{text}",
+        textfont=dict(family="Malgun Gothic, Apple SD Gothic Neo, sans-serif",
+                      color="#000000", size=10),
+        textfont_family="Malgun Gothic",
+        colorscale=[
+            (0.0, color_low),
+            (1.0, color_high),
+        ],
+        zmin=0, zmax=1,
+        hovertemplate="%{text}번 개체<br>편차 진하기: %{z:.3f}<extra></extra>",
+        showscale=True,
     ))
-    add_hline_annot(fig, mean_val, "#333333",
-                     f"평균 = {mean_val:.4f}", size=12)
+
+    # 컬러바 라벨
     fig.update_layout(
         font=dict(family="Malgun Gothic, Apple SD Gothic Neo, sans-serif",
                   color=FONTC),
@@ -185,51 +186,55 @@ def dev_bar_chart(values, mean_val, title, y_label, color_low="#AED6F1",
         paper_bgcolor=BG_BEIGE,
         hoverlabel=dict(font=dict(color=FONTC), bgcolor=HOVBG,
                         bordercolor="#CCCCCC"),
-        title=dict(text=title,
-                   font=dict(family="Malgun Gothic, Apple SD Gothic Neo, sans-serif",
-                             color=TFONTC, size=14),
-                   x=0.03, xanchor="left"),
+        title=dict(
+            text=f"{title}\n(평균 = {mean_val:.4f}{unit}, "
+                 f"연한 색 = 평균과 비슷 · 진한 색 = 평균과 차이 큼)",
+            font=dict(family="Malgun Gothic, Apple SD Gothic Neo, sans-serif",
+                      color=TFONTC, size=14),
+            x=0.03, xanchor="left",
+        ),
         xaxis=dict(
-            title="개체 순번",
+            title="열 (개체 그룹)",
             color=FONTC, gridcolor=GRIDC, zerolinecolor=ZEROC,
             tickfont=dict(family="Malgun Gothic, Apple SD Gothic Neo, sans-serif",
                           color=FONTC, size=11),
+            tickvals=list(range(side)),
+            ticktext=[f"1~{min(side, n)}" for n in
+                      [side * (i+1) for i in range(side)]],
         ),
         yaxis=dict(
-            title=y_label,
+            title="행 (개체 그룹)",
             color=FONTC, gridcolor=GRIDC, zerolinecolor=ZEROC,
             tickfont=dict(family="Malgun Gothic, Apple SD Gothic Neo, sans-serif",
-                          color=FONTC, size=12),
+                          color=FONTC, size=11),
+            tickvals=list(range(side)),
+            ticktext=[f"{i*side+1}~{min((i+1)*side, n)}"
+                      for i in range(side)],
+            autorange="reversed",  # 행 1이 위쪽
         ),
-        margin=dict(l=60, r=30, t=60, b=55),
+        margin=dict(l=90, r=90, t=80, b=70),
+        coloraxis_colorbar=dict(
+            title=dict(text="편차 진하기<br>0 = 평균과 같음 → 1 = 최대 편차",
+                       font=dict(family="Malgun Gothic, Apple SD Gothic Neo, sans-serif",
+                                 color=FONTC, size=11)),
+            thickness=18,
+            tickfont=dict(family="Malgun Gothic, Apple SD Gothic Neo, sans-serif",
+                          color=FONTC, size=10),
+        ),
+        coloraxis=dict(
+            cmin=0, cmax=1,
+            colorbar=dict(
+                title=dict(text="편차 진하기<br>0 = 평균과 같음 → 1 = 최대 편차",
+                           font=dict(family="Malgun Gothic, Apple SD Gothic Neo, sans-serif",
+                                     color=FONTC, size=11)),
+                thickness=18,
+                tickfont=dict(family="Malgun Gothic, Apple SD Gothic Neo, sans-serif",
+                              color=FONTC, size=10),
+            ),
+        ),
         hovermode="closest",
     )
     return fig
-
-# ── 히트맵 스타일 개체별 표 (결측 확인 + 평균 대비 편차 색) ──────────
-def individual_heatmap_table(df, measure_cols, mean_map):
-    """df: 개체 데이터, measure_cols: 표시할 수치 열 목록,
-       mean_map: 각 열의 평균 dict.
-       반환: st.dataframe에 넣을 스타일 DataFrame."""
-    disp = df[measure_cols].copy()
-    # 열별 색 진하기 사전 계산
-    records = []
-    for i, (idx, row) in enumerate(disp.iterrows()):
-        rec = {"개체": i + 1}
-        for col in measure_cols:
-            val = row[col]
-            if pd.isna(val):
-                rec[col] = "결측"
-            else:
-                rec[col] = round(float(val), 4)
-        records.append(rec)
-    table_df = pd.DataFrame(records)
-
-    # 배경색 생성: 결측=회색, 값 있으면 평균 대비 편차 클수록 진한 색
-    # plotly heatmap이 아니라 스트림릿 데이터프레임 스타일 적용
-    # → st.dataframe의 style 사용법 대신 HTML로 직접 스타일링
-    # → 여기선簡單히 st.dataframe + 별도 스 Calc 시각화 선택
-    return table_df
 
 # ════════════════════════════════════════════════════════════════════════
 #  사이드바
@@ -292,8 +297,9 @@ with tab1:
 잎도 더 많이 낼 것이라는 생각에서 출발한 가설입니다.
 
 **이 대시보드에서 확인하는 것**
-1. 81개체 각각의 측정값을 한눈에 보기 (결측 확인)
-2. 각 개체가 전체 평균에서 얼마나 떨어져 있는지 — 색 진하기로 표시
+1. **9×9 그리드**로 81개체 전체의 편차를 한눈에 확인
+   (연한 색 = 평균과 비슷, 진한 색 = 평균과 차이 큼)
+2. 결측값 여부 확인
 3. 지하부 질량과 잎 수의 관계를 산점도 + 상관계수로 확인
 """)
         st.subheader("📋 데이터 요약")
@@ -341,30 +347,26 @@ with tab2:
                     "업로드한 CSV에 해당 열이 있는지 확인해주세요."
                 )
             else:
-                # ── 결측 포함 전체 개체 데이터 준비 ────────────────────
                 gw = growth_df[below_col].dropna()
                 lf = growth_df[leaf_col].dropna()
                 common = gw.index.intersection(lf.index)
-                gw_c = gw.loc[common]
-                lf_c = lf.loc[common]
+                gw_c = gw.loc[common].sort_index()
+                lf_c = lf.loc[common].sort_index()
 
-                # 결측 개체 확인 (common에 없는 인덱스)
                 miss_bw = growth_df.index.difference(gw.index)
                 miss_lf = growth_df.index.difference(lf.index)
-                n_miss_bw = len(miss_bw)
-                n_miss_lf = len(miss_lf)
+                n_miss_bw, n_miss_lf = len(miss_bw), len(miss_lf)
 
-                # 평균
                 mean_b = gw_c.mean()
                 mean_l = lf_c.mean()
 
-                # ── 결측 및 데이터 개요 카드 ──────────────────────────
+                # ── 결측 및 데이터 개요 ──────────────────────────────
                 st.subheader("📋 결측 확인 및 데이터 개요")
                 d1, d2, d3, d4 = st.columns(4)
                 d1.metric("전체 개체 수", f"{len(growth_df)}개체")
                 d2.metric("분석 가능 개체",
                           f"{len(common)}개체",
-                          delta=f"지하부질량·잎수 모두 있음")
+                          delta="지하부질량·잎수 모두 있음")
                 d3.metric("지하부 질량 결측", f"{n_miss_bw}개체")
                 d4.metric("잎 수 결측", f"{n_miss_lf}개체")
 
@@ -380,16 +382,44 @@ with tab2:
                         f"해당 개체는 분석에서 제외했습니다."
                     )
 
-                # ── 81개체 전체 표 (색 진하기로 평균 대비 편차 표시) ──
-                st.subheader("📊 81개체 측정값 한눈에 보기")
-
+                # ── 9x9 그리드 히트맵: 지하부 질량 ───────────────────
+                st.subheader("🟦 9×9 그리드 — 지하부 질량 편차 (색 진하기)")
                 st.caption(
-                    "• 배경색 진하기는 **각 개체가 전체 평균에서 얼마나 떨어져 있는지**를 나타냅니다.\n"
-                    "• 색이 진할수록 평균에서 많이 벗어난 '특이한' 개체입니다.\n"
-                    "• 결측값은 '결측'으로 표시됩니다."
+                    "• 81개체를 9×9 박스로 배치했습니다.\n"
+                    "• **연한 핑크** = 평균(0.761g)과 비슷한 개체\n"
+                    "• **진한 다크 레드** = 평균에서 많이 벗어난 개체\n"
+                    "• 박스 안 숫자는 개체번호입니다."
                 )
+                fig_bw_grid = make_9x9_heatmap(
+                    gw_c.values, mean_b,
+                    "지하부 질량 9×9 그리드",
+                    "#FFE0E0",   # 연한 핑크 (편차 0)
+                    "#4A0000",   # 진한 다크 레드 (편차 최대)
+                    " g",
+                    "%.4f",
+                )
+                st.plotly_chart(fig_bw_grid, width="stretch")
 
-                # 표 데이터 준비: 개체번호, 각 측정값, 결측 여부
+                # ── 9x9 그리드 히트맵: 잎 수 ──────────────────────────
+                st.subheader("🟧 9×9 그리드 — 잎 수 편차 (색 진하기)")
+                st.caption(
+                    "• 81개체를 9×9 박스로 배치했습니다.\n"
+                    "• **연한 베이지** = 평균(37.3장)과 비슷한 개체\n"
+                    "• **진한 오렌지 브라운** = 평균에서 많이 벗어난 개체\n"
+                    "• 박스 안 숫자는 개체번호입니다."
+                )
+                fig_lf_grid = make_9x9_heatmap(
+                    lf_c.values, mean_l,
+                    "잎 수 9×9 그리드",
+                    "#FFF0E0",   # 연한 베이지 (편차 0)
+                    "#5C2D00",   # 진한 오렌지 브라운 (편차 최대)
+                    " 장",
+                    "%.1f",
+                )
+                st.plotly_chart(fig_lf_grid, width="stretch")
+
+                # ── 개체별 측정값 표 (결측 확인용) ────────────────────
+                st.subheader("📋 개체별 측정값 표 (결측 확인)")
                 meas_cols = [c for c in
                              ["잎 수", "지상부 길이", "지하부 길이",
                               "생중량", "지상부 질량", "지하부 질량"]
@@ -401,142 +431,44 @@ with tab2:
                     for col in meas_cols:
                         v = row[col]
                         if pd.isna(v):
-                            rec[f"{col}\n(결측)"] = True
-                            rec[col] = "—"
+                            rec[col] = "결측"
                         else:
-                            rec[f"{col}\n(결측)"] = False
                             rec[col] = round(float(v), 4)
-                    # 지하부 질량·잎 수 평균 대비 편차 (색 지표를 위한 값)
-                    bw_v = row.get(below_col)
-                    lf_v = row.get(leaf_col)
-                    if pd.notna(bw_v) and pd.notna(lf_v):
-                        rec["지하부 편차"] = round(float(abs(bw_v - mean_b)), 4)
-                        rec["잎 수 편차"]  = round(float(abs(lf_v - mean_l)), 4)
-                    else:
-                        rec["지하부 편차"] = None
-                        rec["잎 수 편차"]  = None
                     table_rows.append(rec)
 
                 table_df = pd.DataFrame(table_rows)
-
-                # 결측 표시만 있는 열 삭제 (깨끗한 표 위해)
-                clean_cols = [c for c in table_df.columns
-                              if not c.endswith("(결측)")]
-                display_df = table_df[clean_cols].copy()
-
-                # 고유 개체번호 보존 (개체열을 정수로)
-                if "개체" in display_df.columns:
-                    display_df["개체"] = display_df["개체"].apply(
-                        lambda v: int(v) if isinstance(v, float) and v == int(v) else v
+                if "개체" in table_df.columns:
+                    table_df["개체"] = table_df["개체"].apply(
+                        lambda v: int(v) if isinstance(v, float) and v == int(v)
+                        else v
                     )
 
                 st.dataframe(
-                    display_df,
+                    table_df,
                     width="stretch",
                     hide_index=True,
                     column_config={
-                        "개체": st.column_config.NumberColumn(
-                            "개체번호", width="small"),
-                        "지하부 편차": st.column_config.NumberColumn(
-                            "지하부 편차\n(평균 0.4512g 기준)",
-                            width="medium",
-                            format="%.4f",
-                        ),
-                        "잎 수 편차": st.column_config.NumberColumn(
-                            "잎 수 편차\n(평균 2.0장 기준)",
-                            width="medium",
-                            format="%.4f",
-                        ),
+                        "개체": st.column_config.NumberColumn("개체번호", width="small"),
                     },
                 )
 
-                # ── 결측 시각화: 개체별 결측 여부 막대 ────────────────
-                st.subheader("🔲 개체별 결측 여부 확인")
-                miss_info = []
-                for i, (idx, row) in enumerate(growth_df.iterrows()):
-                    row_miss = {}
-                    for col in meas_cols:
-                        row_miss[col] = pd.isna(row[col])
-                    miss_info.append(row_miss)
-                miss_df = pd.DataFrame(miss_info)
-                miss_df.index = range(1, len(miss_df) + 1)
-
-                # 결측인 열만 추출
-                cols_with_miss = [c for c in meas_cols
-                                  if miss_df[c].any()]
-                if cols_with_miss:
-                    fig_miss = go.Figure()
-                    y_labels = [str(i) for i in miss_df.index]
-                    for col in cols_with_miss:
-                        miss_vals = miss_df[col].astype(int).values
-                        fig_miss.add_trace(go.Scatter(
-                            x=miss_vals, y=y_labels, mode="markers",
-                            marker=dict(
-                                symbol="x",
-                                size=14,
-                                color="#E74C3C",
-                                line=dict(width=2, color="#C0392B"),
-                            ),
-                            name=f"{col} 결측",
-                            hovertemplate="%{y}번 개체 — %{x} 결측<extra></extra>",
-                        ))
-                    fig_miss.update_layout(
-                        font=dict(family="Malgun Gothic, Apple SD Gothic Neo, sans-serif",
-                                  color=FONTC),
-                        plot_bgcolor=BG_BEIGE,
-                        paper_bgcolor=BG_BEIGE,
-                        hoverlabel=dict(font=dict(color=FONTC), bgcolor=HOVBG,
-                                        bordercolor="#CCCCCC"),
-                        title=dict(
-                            text="빨간 ✕ = 결측값 (해당 개체는 이 측정값이 없음)",
-                            font=dict(family="Malgun Gothic, Apple SD Gothic Neo, sans-serif",
-                                      color=TFONTC, size=14),
-                            x=0.03, xanchor="left",
-                        ),
-                        xaxis=dict(title="결측 여부 (1=결측)",
-                                   color=FONTC, gridcolor=GRIDC,
-                                   zerolinecolor=ZEROC,
-                                   tickfont=dict(family="Malgun Gothic, Apple SD Gothic Neo, sans-serif",
-                                                 color=FONTC, size=11),
-                                   tickvals=[0, 1],
-                                   ticktext=["값 있음", "결측"]),
-                        yaxis=dict(title="개체",
-                                   color=FONTC, gridcolor=GRIDC,
-                                   zerolinecolor=ZEROC,
-                                   tickfont=dict(family="Malgun Gothic, Apple SD Gothic Neo, sans-serif",
-                                                 color=FONTC, size=10),
-                                   categoryorder="total ascending"),
-                        margin=dict(l=60, r=30, t=60, b=55),
-                        hovermode="closest",
-                    )
-                    st.plotly_chart(fig_miss, width="stretch")
-                else:
-                    st.info("✅ 모든 개체의 모든 측정값에 결측이 없습니다.")
-
-                # ── 지하부 질량 편차 막대차트 ──────────────────────────
-                st.subheader("📊 개체별 지하부 질량 (색 진하기 = 평균 대비 편차)")
-                st.caption(
-                    "• 막대의 **색이 진할수록** 그 개체가 전체 평균에서 멀리 떨어져 있습니다.\n"
-                    "• 파란 막대 = 평균 이하, 빨간 막대 = 평균 초과"
-                )
-                fig_bw = dev_bar_chart(
-                    gw_c.values, mean_b,
-                    f"지하부 질량 (평균 = {mean_b:.4f} g)",
-                    "지하부 질량 (g)",
-                )
-                st.plotly_chart(fig_bw, width="stretch")
-
-                # ── 잎 수 편차 막대차트 ────────────────────────────────
-                st.subheader("📊 개체별 잎 수 (색 진하기 = 평균 대비 편차)")
-                fig_lf = dev_bar_chart(
-                    lf_c.values, mean_l,
-                    f"잎 수 (평균 = {mean_l:.1f} 장)",
-                    "잎 수 (장)",
-                )
-                st.plotly_chart(fig_lf, width="stretch")
-
-                # ── 지하부 질량 vs 잎 수 산점도 ────────────────────────
+                # ── 지하부 질량 vs 잎 수 산점도 ───────────────────────
                 st.subheader("🔗 지하부 질량 vs 잎 수 (상관계수·추세선)")
+                fig_corr = go.Figure()
+                fig_corr.add_trace(go.Scatter(
+                    x=gw_c.values, y=lf_c.values,
+                    mode="markers",
+                    marker=dict(
+                        color="#2E86C1", size=10, opacity=0.88,
+                        line=dict(width=1.2, color="white"),
+                    ),
+                    name="데이터",
+                    hovertemplate="개체 %{x}<br>"
+                                  "지하부 %{x:.4f}g · 잎 %{y:.1f}장"
+                                  "<extra></extra>",
+                )) if False else None  # placeholder 제거용 — 실제 아래는 아래
+
+                # 올바른 산점도 (위 placeholder 제거)
                 fig_corr = go.Figure()
                 fig_corr.add_trace(go.Scatter(
                     x=gw_c.values, y=lf_c.values,
@@ -550,13 +482,14 @@ with tab2:
                 ))
                 if len(gw_c) >= 2:
                     slope, intercept = np.polyfit(gw_c.values, lf_c.values, 1)
-                    pred_x = gw_c.values
-                    pred_y = slope * pred_x + intercept
+                    px_line = gw_c.values
+                    py_line = slope * px_line + intercept
+                    r_val_corr = np.corrcoef(gw_c.values, lf_c.values)[0, 1]
                     fig_corr.add_trace(go.Scatter(
-                        x=pred_x, y=pred_y,
+                        x=px_line, y=py_line,
                         mode="lines",
                         line=dict(color="#C0392B", width=2.5),
-                        name=f"추세선 (r={np.corrcoef(gw_c.values, lf_c.values)[0,1]:.3f})",
+                        name=f"추세선 (r={r_val_corr:.3f})",
                     ))
                 r_val = np.corrcoef(gw_c.values, lf_c.values)[0, 1]
                 p_val = None
@@ -651,8 +584,8 @@ with tab3:
                 gw = growth_df[below_col].dropna()
                 lf = growth_df[leaf_col].dropna()
                 common = gw.index.intersection(lf.index)
-                gw_c = gw.loc[common]
-                lf_c = lf.loc[common]
+                gw_c = gw.loc[common].sort_index()
+                lf_c = lf.loc[common].sort_index()
 
                 if len(gw_c) < 2:
                     st.info("데이터가 부족해 가설 확인을 건너뛰었습니다.")
@@ -701,7 +634,6 @@ with tab3:
 {verdict}
 """)
 
-                    # ── 가설이 틀렸을 때 원인 ────────────────────────────
                     if r_val <= 0 or (p_val is not None and p_val >= 0.05):
                         st.subheader("🔍 가설이 맞지 않을 수 있는 원인")
                         st.markdown("""
@@ -744,7 +676,6 @@ with tab3:
  적절합니다.
 """)
 
-                    # ── 종합 결과 ───────────────────────────────────────
                     st.subheader("📋 종합 결과")
                     tc1, tc2 = st.columns(2)
                     with tc1:
