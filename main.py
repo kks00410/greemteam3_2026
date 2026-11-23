@@ -13,7 +13,7 @@ html, body, [class*="css"] {
 }
 </style>
 """, unsafe_allow_html=True)
-st.set_page_config(page_title="극지식물 연구 가설과 분석 결과", layout="wide")
+st.set_page_config(page_title="그린 3팀(김성빈, 최승민, 천영현, 윤효승)극지식물 연구 가설과 분석 결과", layout="wide")
 
 # ── CSV 읽기 (인코딩 자동 전환) ─────────────────────────────────────────
 @st.cache_data
